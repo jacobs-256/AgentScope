@@ -1,0 +1,26 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="630" fill="#F8F0DF"/>
+  <circle cx="152" cy="88" r="240" fill="#E4AA32" fill-opacity="0.24"/>
+  <circle cx="1018" cy="166" r="260" fill="#54A7BB" fill-opacity="0.2"/>
+  <path d="M0 0H1200V630H0V0Z" fill="url(#grid)" fill-opacity="0.32"/>
+  <rect x="80" y="72" width="1040" height="486" rx="42" fill="#FFF8ED" fill-opacity="0.82" stroke="#16201C" stroke-opacity="0.12"/>
+  <text x="126" y="150" fill="#365F45" font-family="Trebuchet MS, sans-serif" font-size="26" font-weight="700" letter-spacing="3">OPEN-SOURCE AI AGENT DEVTOOLS</text>
+  <text x="124" y="277" fill="#16201C" font-family="Georgia, serif" font-size="92" font-weight="700" letter-spacing="-6">Debug agents</text>
+  <text x="124" y="371" fill="#16201C" font-family="Georgia, serif" font-size="92" font-weight="700" letter-spacing="-6">like a movie.</text>
+  <text x="130" y="431" fill="#6F776F" font-family="Trebuchet MS, sans-serif" font-size="28">Prompts, MCP calls, diffs, failures, tokens, and costs in one timeline.</text>
+  <g transform="translate(758 132)">
+    <rect width="286" height="342" rx="30" fill="#16201C"/>
+    <circle cx="48" cy="54" r="10" fill="#6EE7A7"/>
+    <text x="76" y="63" fill="#FFF7E8" font-family="Trebuchet MS, sans-serif" font-size="20" font-weight="700">run_codex_7f32</text>
+    <rect x="36" y="112" width="214" height="12" rx="6" fill="#365F45"/>
+    <rect x="36" y="156" width="166" height="12" rx="6" fill="#E4AA32"/>
+    <rect x="36" y="200" width="226" height="12" rx="6" fill="#C95D3E"/>
+    <rect x="36" y="244" width="188" height="12" rx="6" fill="#54A7BB"/>
+    <rect x="36" y="288" width="128" height="12" rx="6" fill="#FFF7E8" fill-opacity="0.72"/>
+  </g>
+  <defs>
+    <pattern id="grid" width="44" height="44" patternUnits="userSpaceOnUse">
+      <path d="M 44 0 L 0 0 0 44" fill="none" stroke="#16201C" stroke-width="1"/>
+    </pattern>
+  </defs>
+</svg>
