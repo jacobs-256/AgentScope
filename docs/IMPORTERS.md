@@ -1,5 +1,7 @@
 # Importers
 
+> Language: English | [中文简体](./zh-CN/02-guides/importers.md)
+
 AgentScope imports AI agent records and converts them into the AgentScope trace format.
 
 ## Supported formats
@@ -18,7 +20,7 @@ The browser import uses a manual folder picker. Candidate files are selected by 
 - `.json`
 - `.jsonl`
 - `.log`
-- paths containing `rollout`, `session`, `transcript`, `claude`, `codex`, `conversation`, `cursor`, or `cline`
+- paths containing `rollout`, `session`, `transcript`, `claude`, `codex`, `conversation`, `cursor`, `cline`, `agentscope`, or `trace`
 
 If multiple traces are detected, AgentScope shows an import picker. The best match is sorted first by file modification time, then by event count, but users choose which trace to load.
 
@@ -89,6 +91,12 @@ data/fixtures/
 ```
 
 Current fixtures cover native AgentScope trace JSON, Codex rollout JSONL, Claude Code transcript JSONL, and generic JSONL records. They are synthetic and safe for repository use.
+
+Run importer fixture tests with:
+
+```bash
+npm test
+```
 
 ## Adding an importer
 

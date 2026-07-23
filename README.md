@@ -1,5 +1,7 @@
 # AgentScope
 
+> Language: English | [中文简体](./docs/zh-CN/01-overview/project-overview.md)
+
 Open-source DevTools for AI agents.
 
 AgentScope turns AI agent runs into a readable timeline: prompts, reasoning, tool calls, MCP activity, file changes, failures, tokens, cost, and raw outputs in one local-first workspace.
@@ -30,6 +32,9 @@ AgentScope is a lightweight trace viewer for answering those questions locally.
 - **Trace export**: export the currently loaded trace as JSON.
 - **Import diagnostics**: inspect skipped files, JSONL parse warnings, and detected trace candidates.
 - **Privacy exports**: create sanitized JSON or single-file static HTML reports for review and sharing.
+- **Live capture CLI**: record command runs and MCP stdio sessions into local trace files.
+- **Stable trace schema**: new traces include `traceVersion: "1.0"` and importer fixtures are tested in CI.
+- **Trace comparison**: load a second trace to compare event counts, failures, tools, diffs, duration, tokens, and risk.
 
 ## Status
 
@@ -70,6 +75,34 @@ Preview the production build:
 ```bash
 npm run preview
 ```
+
+## Live Capture
+
+Record a command run as a local AgentScope trace:
+
+```bash
+npm run agentscope -- record -- npm run build
+```
+
+Proxy an MCP stdio server and capture JSON-RPC request timing and status:
+
+```bash
+npm run agentscope -- mcp-proxy -- node ./mcp-server.js
+```
+
+Captured traces are written to:
+
+```text
+.agentscope/traces/
+```
+
+List local captures:
+
+```bash
+npm run agentscope -- list
+```
+
+The `.agentscope/` directory is ignored by Git because live captures can contain private trace data. See [Live Capture](./docs/LIVE_CAPTURE.md) for details.
 
 ## Import Traces
 
@@ -129,6 +162,7 @@ AgentScope uses a simple JSON shape:
 
 ```json
 {
+  "traceVersion": "1.0",
   "runId": "run_codex_7f32",
   "agent": "Codex CLI",
   "model": "gpt-5-codex",
@@ -168,6 +202,7 @@ Supported step types:
 - `diff`
 
 See [Trace Format](./docs/TRACE_FORMAT.md) for details.
+See [Schema Versioning](./docs/SCHEMA_VERSIONING.md) for compatibility rules.
 
 ## Privacy
 
@@ -183,6 +218,7 @@ See [Privacy Guide](./docs/PRIVACY.md) and [Security Policy](./SECURITY.md).
 npm install
 npm run dev
 npm run build
+npm test
 ```
 
 Project structure:

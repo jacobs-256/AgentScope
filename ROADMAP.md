@@ -1,5 +1,7 @@
 # Roadmap
 
+> Language: English | [中文简体](./docs/zh-CN/01-overview/roadmap.md)
+
 AgentScope is an early MVP. This roadmap is intentionally practical and focused on making the tool useful for real AI agent debugging.
 
 ## 0.1 - Trace Viewer MVP
@@ -33,15 +35,15 @@ AgentScope is an early MVP. This roadmap is intentionally practical and focused 
 
 ## 0.4 - Live Capture
 
-- [ ] `agentscope record -- <command>`
-- [ ] MCP proxy mode
-- [ ] Tool call timing and status tracking
-- [ ] Local trace storage
+- [x] `agentscope record -- <command>`
+- [x] MCP proxy mode
+- [x] Tool call timing and status tracking
+- [x] Local trace storage
 
 ## 1.0 - Stable Trace Schema
 
-- [ ] Versioned trace schema
-- [ ] Importer test suite
-- [ ] Stable documentation
-- [ ] GitHub Action integration
-- [ ] Trace comparison view
+- [x] Versioned trace schema
+- [x] Importer test suite
+- [x] Stable documentation
+- [x] GitHub Action integration
+- [x] Trace comparison view

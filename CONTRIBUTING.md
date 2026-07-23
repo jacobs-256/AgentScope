@@ -1,5 +1,7 @@
 # Contributing to AgentScope
 
+> Language: English | [中文简体](./docs/zh-CN/04-community/contributing.md)
+
 Thanks for your interest in AgentScope. The project is early, so clear bug reports, importer samples, UI feedback, and focused pull requests are especially valuable.
 
 ## Ways to contribute

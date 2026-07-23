@@ -1,4 +1,6 @@
-﻿# Importer Fixtures
+# Importer Fixtures
+
+> Language: English | [中文简体](../../docs/zh-CN/05-samples/importer-fixtures.md)
 
 These files are synthetic fixtures for importer development and manual QA. They must not be replaced with private local traces.
 

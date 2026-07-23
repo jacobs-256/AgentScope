@@ -1,5 +1,7 @@
 # Support
 
+> Language: English | [中文简体](./docs/zh-CN/04-community/support.md)
+
 AgentScope is an early open-source project.
 
 ## Questions

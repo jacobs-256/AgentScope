@@ -1,5 +1,7 @@
 # Development Guide
 
+> Language: English | [中文简体](./zh-CN/02-guides/development.md)
+
 ## Requirements
 
 - Node.js
@@ -24,10 +26,28 @@ npm run dev
 npm run build
 ```
 
+## Test
+
+```bash
+npm test
+```
+
+The test suite validates importer fixtures, required trace shape, importer-specific metadata, tool-result pairing, token extraction, and schema versioning.
+
 ## Preview production build
 
 ```bash
 npm run preview
+```
+
+## CLI
+
+Run the local AgentScope CLI:
+
+```bash
+npm run agentscope -- --help
+npm run agentscope -- record -- npm run build
+npm run agentscope -- list
 ```
 
 ## Main files
@@ -35,9 +55,12 @@ npm run preview
 ```text
 src/main.jsx                  React app, importers, trace viewer
 src/styles.css                Application styling
+scripts/agentscope.js         Local live-capture CLI
 scripts/codex-rollout-to-trace.py
 docs/TRACE_FORMAT.md
+docs/SCHEMA_VERSIONING.md
 docs/IMPORTERS.md
+docs/LIVE_CAPTURE.md
 ```
 
 ## UI layout
@@ -72,6 +95,23 @@ When adding importer support:
 - Keep private data handling in mind.
 - Add documentation updates in `docs/IMPORTERS.md`.
 - Add or update synthetic fixtures in `data/fixtures/` when importer behavior changes.
+
+## CI
+
+GitHub Actions runs `npm ci`, `npm test`, and `npm run build` for pushes and pull requests targeting `main`.
+
+## Live capture development
+
+The live-capture CLI lives in `scripts/agentscope.js`.
+
+When changing live capture:
+
+- Keep capture local-first and file-based.
+- Write generated traces under `.agentscope/traces/` by default.
+- Preserve command exit codes for `record`.
+- Keep MCP proxy mode transparent: forward stdio without modifying protocol bytes.
+- Track tool status and duration when request/response ids are available.
+- Update `docs/LIVE_CAPTURE.md` and `docs/TRACE_FORMAT.md` when trace metadata changes.
 
 ## Release checklist
 

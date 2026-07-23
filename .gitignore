@@ -19,6 +19,7 @@ yarn-error.log*
 pnpm-debug.log*
 
 # Local trace exports and private agent records
+.agentscope/
 data/codex-latest-trace.json
 data/*.trace.json
 data/*-trace.json

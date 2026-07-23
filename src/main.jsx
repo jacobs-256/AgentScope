@@ -13,6 +13,8 @@ import xml from "highlight.js/lib/languages/xml";
 import { marked } from "marked";
 import "./styles.css";
 
+const TRACE_VERSION = "1.0";
+
 hljs.registerLanguage("bash", bash);
 hljs.registerLanguage("css", css);
 hljs.registerLanguage("javascript", javascript);
@@ -23,6 +25,7 @@ hljs.registerLanguage("typescript", typescript);
 hljs.registerLanguage("xml", xml);
 
 const emptyTrace = {
+  traceVersion: TRACE_VERSION,
   runId: "no-trace-loaded",
   agent: "No agent selected",
   model: "waiting for import",
@@ -59,7 +62,7 @@ const typeDescriptions = {
 };
 
 const candidateExtensions = [".json", ".jsonl", ".log"];
-const candidatePathHints = ["rollout", "session", "transcript", "claude", "codex", "conversation", "cursor", "cline"];
+const candidatePathHints = ["rollout", "session", "transcript", "claude", "codex", "conversation", "cursor", "cline", "agentscope", "trace"];
 const redactionToken = "[REDACTED]";
 const pathRedactionToken = "[REDACTED_PATH]";
 const secretRedactionRules = [
@@ -444,6 +447,10 @@ function makeStep(id, type, title, timestamp, status, content, extras = {}) {
   };
 }
 
+function normalizeTrace(trace) {
+  return { ...trace, traceVersion: trace.traceVersion || TRACE_VERSION };
+}
+
 function buildTrace({ runId, agent, model, status, summary, source, records, steps }) {
   const timestamps = (records || []).map(getEventTimestamp).filter(Boolean);
   const first = timestamps[0];
@@ -453,6 +460,7 @@ function buildTrace({ runId, agent, model, status, summary, source, records, ste
   const toolCount = steps.filter((step) => step.type === "tool").length;
 
   return {
+    traceVersion: TRACE_VERSION,
     runId,
     agent,
     model: model || "unknown",
@@ -734,7 +742,7 @@ function convertGenericRecords(records, sourceName) {
 
 function detectAndConvert(records, sourceName) {
   if (!records.length) throw new Error("No records found.");
-  if (records[0]?.steps && Array.isArray(records[0].steps)) return records[0];
+  if (records[0]?.steps && Array.isArray(records[0].steps)) return normalizeTrace(records[0]);
   if (records.some((record) => ["session_meta", "response_item", "user_message", "function_call", "custom_tool_call"].includes(record.payload?.type) || ["user_message", "function_call", "custom_tool_call"].includes(getCodexEventType(record)))) {
     return convertCodexRecords(records, sourceName);
   }
@@ -753,7 +761,7 @@ async function importTraceFile(file, diagnostics) {
   if (trimmed.startsWith("{")) {
     try {
       const json = JSON.parse(trimmed);
-      if (Array.isArray(json.steps)) return json;
+      if (Array.isArray(json.steps)) return normalizeTrace(json);
       return detectAndConvert([json], sourceName);
     } catch {
       const records = parseJsonLines(trimmed, sourceName, diagnostics);
@@ -763,7 +771,7 @@ async function importTraceFile(file, diagnostics) {
 
   if (trimmed.startsWith("[")) {
     const json = JSON.parse(trimmed);
-    if (Array.isArray(json) && json[0]?.steps) return json[0];
+    if (Array.isArray(json) && json[0]?.steps) return normalizeTrace(json[0]);
     if (Array.isArray(json)) return detectAndConvert(json, sourceName);
   }
 
@@ -793,6 +801,32 @@ function describeImportCandidate(candidate, index) {
     sourceKind: trace.source?.kind || "unknown",
     trace,
   };
+}
+
+function summarizeTrace(trace) {
+  const steps = trace.steps || [];
+  return {
+    events: steps.length,
+    prompts: steps.filter((step) => step.type === "prompt").length,
+    tools: steps.filter((step) => step.type === "tool").length,
+    diffs: steps.filter((step) => step.type === "diff").length,
+    failures: steps.filter((step) => step.status === "failed").length,
+    changedFiles: steps.reduce((sum, step) => sum + (step.files?.length ?? 0), 0),
+    durationMs: Number(trace.durationMs || 0),
+    tokens: Number(trace.tokens?.total || 0),
+    riskScore: clampRisk(trace.riskScore),
+  };
+}
+
+function compareTraceSummaries(baseTrace, comparisonTrace) {
+  const base = summarizeTrace(baseTrace);
+  const compare = summarizeTrace(comparisonTrace);
+  return Object.entries(base).map(([key, baseValue]) => ({
+    key,
+    baseValue,
+    compareValue: compare[key],
+    delta: compare[key] - baseValue,
+  }));
 }
 
 function ContentBlock({ label, value, preferredKind }) {
@@ -872,7 +906,7 @@ function MetricCard({ label, value, hint, tone }) {
   );
 }
 
-function TopBar({ trace, onUpload, onFolderUpload, onExport, onSanitizedExport, onHtmlReport, importStatus }) {
+function TopBar({ trace, onUpload, onFolderUpload, onCompareUpload, onExport, onSanitizedExport, onHtmlReport, importStatus }) {
   return (
     <header className="top-bar">
       <div className="brand-lockup">
@@ -900,6 +934,10 @@ function TopBar({ trace, onUpload, onFolderUpload, onExport, onSanitizedExport, 
         <label className="action folder-action">
           Scan Folder
           <input type="file" webkitdirectory="true" directory="true" multiple onChange={onFolderUpload} />
+        </label>
+        <label className="action compare-action">
+          Compare
+          <input type="file" accept=".json,.jsonl" onChange={onCompareUpload} />
         </label>
         <button className="action ghost-action" onClick={onExport}>
           Export JSON
@@ -1055,6 +1093,50 @@ function HeroPanel({ trace, failures }) {
           <span style={{ width: `${risk}%` }} />
         </div>
         <p>{failures ? `${failures} failed event needs review` : "No failed events detected"}</p>
+      </div>
+    </section>
+  );
+}
+
+function TraceComparisonPanel({ trace, comparisonTrace, onClear }) {
+  if (!comparisonTrace) return null;
+  const rows = compareTraceSummaries(trace, comparisonTrace);
+
+  function displayCompareValue(key, value) {
+    if (key === "durationMs") return formatDuration(value);
+    if (key === "tokens") return value.toLocaleString();
+    return value;
+  }
+
+  function displayDelta(row) {
+    const prefix = row.delta > 0 ? "+" : row.delta < 0 ? "-" : "";
+    const magnitude = Math.abs(row.delta);
+    if (row.key === "durationMs") return `${prefix}${formatDuration(magnitude)}`;
+    return `${prefix}${magnitude.toLocaleString()}`;
+  }
+
+  return (
+    <section className="comparison-panel" aria-label="Trace comparison">
+      <div className="comparison-heading">
+        <div>
+          <span className="eyebrow">Trace Compare</span>
+          <h2>{comparisonTrace.runId || "comparison trace"}</h2>
+        </div>
+        <button onClick={onClear}>Clear</button>
+      </div>
+      <div className="comparison-grid">
+        {rows.map((row) => (
+          <article className="comparison-card" key={row.key}>
+            <span>{row.key}</span>
+            <strong>
+              {displayCompareValue(row.key, row.compareValue)}
+              <em className={row.delta > 0 ? "up" : row.delta < 0 ? "down" : ""}>
+                {displayDelta(row)}
+              </em>
+            </strong>
+            <small>Base: {displayCompareValue(row.key, row.baseValue)}</small>
+          </article>
+        ))}
       </div>
     </section>
   );
@@ -1279,6 +1361,7 @@ function App() {
   const [importStatus, setImportStatus] = useState("");
   const [importDiagnostics, setImportDiagnostics] = useState([]);
   const [importCandidates, setImportCandidates] = useState([]);
+  const [comparisonTrace, setComparisonTrace] = useState(null);
 
   const counts = useMemo(() => {
     const next = { all: trace.steps.length, prompt: 0, reasoning: 0, tool: 0, diff: 0 };
@@ -1485,6 +1568,22 @@ function App() {
     event.target.value = "";
   }
 
+  async function handleCompareUpload(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const diagnostics = [];
+    try {
+      const nextTrace = await importTraceFile(file, diagnostics);
+      setComparisonTrace(nextTrace);
+      setImportStatus(`Comparing against ${file.name} (${nextTrace.steps.length} events)`);
+    } catch (error) {
+      setImportStatus(`Failed to compare ${file.name}: ${error.message}`);
+      alert(`Could not load comparison trace: ${error.message}`);
+    } finally {
+      event.target.value = "";
+    }
+  }
+
   async function handleCandidateSelect(candidate) {
     setImportCandidates([]);
     const diagnostics = [...importDiagnostics];
@@ -1517,6 +1616,7 @@ function App() {
         trace={trace}
         onUpload={handleTraceUpload}
         onFolderUpload={handleFolderUpload}
+        onCompareUpload={handleCompareUpload}
         onExport={downloadReport}
         onSanitizedExport={downloadSanitizedReport}
         onHtmlReport={downloadHtmlReport}
@@ -1540,6 +1640,7 @@ function App() {
             <MetricCard label="Tokens" value={tokenTotal.toLocaleString()} hint="Prompt + output" tone="green" />
             <MetricCard label="Cost" value={`$${cost.toFixed(2)}`} hint="Estimated run spend" tone="ink" />
           </section>
+          <TraceComparisonPanel trace={trace} comparisonTrace={comparisonTrace} onClear={() => setComparisonTrace(null)} />
           <StepDetails
             step={selected}
             position={selectedPosition}

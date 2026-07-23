@@ -1,5 +1,7 @@
 # Code of Conduct
 
+> Language: English | [中文简体](./docs/zh-CN/04-community/code-of-conduct.md)
+
 ## Our pledge
 
 We want AgentScope to be a welcoming project for developers, designers, researchers, and AI tool builders.

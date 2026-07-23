@@ -1,11 +1,14 @@
 # Trace Format
 
+> Language: English | [中文简体](./zh-CN/03-reference/trace-format.md)
+
 AgentScope traces are JSON documents that describe one AI agent run.
 
 ## Top-level fields
 
 | Field | Type | Required | Description |
 |---|---:|---:|---|
+| `traceVersion` | string | yes | Versioned AgentScope trace schema. Current stable value is `1.0`. |
 | `runId` | string | yes | Unique run identifier. |
 | `agent` | string | yes | Agent or tool name. |
 | `model` | string | no | Model name if known. |
@@ -26,13 +29,14 @@ AgentScope traces are JSON documents that describe one AI agent run.
 
 | Field | Type | Required | Description |
 |---|---:|---:|---|
-| `kind` | string | no | Importer identifier, such as `codex_rollout`, `claude_code_jsonl`, or `generic_jsonl`. |
+| `kind` | string | no | Importer or capture identifier, such as `codex_rollout`, `claude_code_jsonl`, `generic_jsonl`, `agentscope_record`, or `agentscope_mcp_proxy`. |
 | `path` | string | no | Browser-provided file or relative folder path. Treat as sensitive. |
 | `recordCount` | number | no | Number of source records used by the importer. |
 | `threadId` | string | no | Upstream thread/conversation id when available. |
 | `sessionId` | string | no | Upstream session id when available. |
 | `cwd` | string | no | Upstream working directory when available. Treat as sensitive. |
 | `cliVersion` | string | no | Upstream CLI version when available. |
+| `command` | string | no | Captured command for local live-capture traces. Treat as sensitive. |
 
 ## Sharing fields
 
@@ -73,6 +77,7 @@ Sanitized JSON exports include a `sharing` block.
 
 ```json
 {
+  "traceVersion": "1.0",
   "runId": "run_demo_001",
   "agent": "Codex",
   "model": "gpt-5-codex",
@@ -102,6 +107,7 @@ Sanitized JSON exports include a `sharing` block.
 
 ## Notes
 
+- `traceVersion` is required for new traces. Importers normalize older unversioned traces to `1.0`.
 - `timestamp` is preferred for date grouping.
 - `time` is only a display convenience.
 - Unknown token and cost values should be `0`.

@@ -1,5 +1,7 @@
 # Privacy Guide
 
+> Language: English | [中文简体](./zh-CN/02-guides/privacy.md)
+
 AgentScope is local-first, but trace data can still be sensitive.
 
 ## What traces may contain
@@ -50,6 +52,10 @@ For path fields such as `source.path`, `source.cwd`, and changed file paths, Age
 - **Export JSON** downloads the currently loaded trace without redaction. Use this only for trusted local review.
 - **Sanitized JSON** downloads a redacted AgentScope trace with a `sharing` metadata block that records redaction counts and rule hits.
 - **HTML Report** downloads a single-file static report. It contains sanitized event content and inline styles only, with no backend, account, telemetry, or external asset dependency.
+
+## Live capture privacy
+
+`agentscope record` and `agentscope mcp-proxy` write raw local captures to `.agentscope/traces/` by default. These files are ignored by Git, but they may contain private prompts, command output, source paths, environment-derived values, and MCP payloads. Treat them as sensitive until they have been loaded into the UI, sanitized, and manually reviewed.
 
 ## Current limitations
 

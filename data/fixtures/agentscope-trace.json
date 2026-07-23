@@ -1,4 +1,5 @@
-﻿{
+{
+  "traceVersion": "1.0",
   "runId": "fixture_agentscope_native",
   "agent": "Fixture Agent",
   "model": "fixture-model",

@@ -1,5 +1,7 @@
 # Security Policy
 
+> Language: English | [中文简体](./docs/zh-CN/04-community/security.md)
+
 ## Supported versions
 
 AgentScope is currently pre-1.0. Security fixes will target the latest version on the default branch.
