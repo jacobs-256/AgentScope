@@ -1,0 +1,7 @@
+﻿{"timestamp":"2026-07-21T10:00:00Z","payload":{"type":"session_meta","id":"fixture-codex-session","thread_id":"fixture-codex-thread","originator":"Codex CLI","model":"gpt-5-codex","cwd":"C:\\fixtures\\agentscope","cli_version":"0.99.0","title":"Synthetic Codex importer fixture"}}
+{"timestamp":"2026-07-21T10:00:04Z","payload":{"type":"user_message","message":"Inspect the synthetic test failure."}}
+{"timestamp":"2026-07-21T10:00:08Z","payload":{"type":"response_item","item":{"type":"reasoning","summary":[{"type":"summary_text","text":"Plan the smallest safe inspection."}]}}}
+{"timestamp":"2026-07-21T10:00:12Z","payload":{"type":"response_item","item":{"type":"function_call","call_id":"call_shell_1","name":"shell_command","arguments":{"command":"npm test -- synthetic"}}}}
+{"timestamp":"2026-07-21T10:00:16Z","payload":{"type":"response_item","item":{"type":"function_call_output","call_id":"call_shell_1","output":"2 synthetic tests passed."}}}
+{"timestamp":"2026-07-21T10:00:18Z","payload":{"type":"patch_apply_end","success":true,"changes":{"src/synthetic.js":{"content":"export const ok = true;\n","previous_content":""}}}}
+{"timestamp":"2026-07-21T10:00:20Z","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":420,"output_tokens":160,"total_tokens":580}}}}

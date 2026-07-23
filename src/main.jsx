@@ -59,7 +59,29 @@ const typeDescriptions = {
 };
 
 const candidateExtensions = [".json", ".jsonl", ".log"];
-const candidatePathHints = ["rollout", "session", "transcript", "claude", "codex", "conversation"];
+const candidatePathHints = ["rollout", "session", "transcript", "claude", "codex", "conversation", "cursor", "cline"];
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function firstPresent(...values) {
+  return values.find((value) => value !== null && value !== undefined && value !== "");
+}
+
+function compactObject(value) {
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== null && item !== undefined && item !== ""));
+}
+
+function getPayload(record) {
+  return isPlainObject(record?.payload) ? record.payload : {};
+}
+
+function getEventTimestamp(record) {
+  const payload = getPayload(record);
+  const item = isPlainObject(payload.item) ? payload.item : {};
+  return firstPresent(record?.timestamp, record?.created_at, record?.createdAt, record?.ts, payload.timestamp, item.timestamp);
+}
 
 function formatDuration(ms) {
   if (!ms) return "instant";
@@ -167,19 +189,25 @@ function markdownHtml(text) {
   return DOMPurify.sanitize(marked.parse(text, { breaks: true }));
 }
 
-function parseJsonLines(text) {
+function addImportDiagnostic(diagnostics, level, path, message, details = {}) {
+  diagnostics?.push({ id: `${Date.now()}_${Math.random().toString(36).slice(2)}`, level, path, message, ...details });
+}
+
+function parseJsonLines(text, sourceName, diagnostics) {
   const records = [];
   const errors = [];
 
   text
     .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .forEach((line, index) => {
+    .forEach((rawLine, index) => {
+      const line = rawLine.trim();
+      if (!line) return;
       try {
         records.push(JSON.parse(line));
       } catch (error) {
-        errors.push(`line ${index + 1}: ${error.message}`);
+        const message = `line ${index + 1}: ${error.message}`;
+        errors.push(message);
+        addImportDiagnostic(diagnostics, "warning", sourceName, `Skipped invalid JSONL ${message}`);
       }
     });
 
@@ -204,9 +232,10 @@ function makeStep(id, type, title, timestamp, status, content, extras = {}) {
   };
 }
 
-function buildTrace({ runId, agent, model, summary, source, records, steps }) {
-  const first = records?.[0]?.timestamp || records?.[0]?.ts || records?.[0]?.created_at;
-  const last = records?.at(-1)?.timestamp || records?.at(-1)?.ts || records?.at(-1)?.created_at;
+function buildTrace({ runId, agent, model, status, summary, source, records, steps }) {
+  const timestamps = (records || []).map(getEventTimestamp).filter(Boolean);
+  const first = timestamps[0];
+  const last = timestamps.at(-1);
   const failedCount = steps.filter((step) => step.status === "failed").length;
   const diffCount = steps.filter((step) => step.type === "diff").length;
   const toolCount = steps.filter((step) => step.type === "tool").length;
@@ -215,16 +244,92 @@ function buildTrace({ runId, agent, model, summary, source, records, steps }) {
     runId,
     agent,
     model: model || "unknown",
-    status: failedCount ? "failed" : "ok",
+    status: status || (failedCount ? "failed" : "ok"),
     startedAt: first || new Date().toISOString(),
     durationMs: durationBetween(first, last),
     tokens: { input: 0, output: 0, total: 0 },
     costUsd: 0,
     riskScore: Math.min(100, failedCount * 28 + diffCount * 9 + toolCount * 3),
     summary,
-    source,
+    source: compactObject({ ...source, recordCount: records?.length || 0 }),
     steps,
   };
+}
+
+function outputLooksFailed(text) {
+  return /\b(error|failed|exception|traceback|exit code:\s*[1-9]|status:\s*[1-9]\d\d)\b/i.test(String(text || ""));
+}
+
+function getCodexItem(event) {
+  const payload = getPayload(event);
+  return payload.type === "response_item" && isPlainObject(payload.item) ? payload.item : payload;
+}
+
+function getCodexEventType(event) {
+  const payload = getPayload(event);
+  const item = getCodexItem(event);
+  return firstPresent(item.type, payload.type, event?.type);
+}
+
+function extractTokenUsage(value) {
+  const usage =
+    value?.usage ||
+    value?.token_usage ||
+    value?.total_token_usage ||
+    value?.info?.total_token_usage ||
+    value?.payload?.usage ||
+    value?.payload?.info?.total_token_usage;
+
+  if (!isPlainObject(usage)) return null;
+
+  const input = Number(firstPresent(usage.input_tokens, usage.prompt_tokens, usage.input, 0));
+  const output = Number(firstPresent(usage.output_tokens, usage.completion_tokens, usage.output, 0));
+  const total = Number(firstPresent(usage.total_tokens, usage.total, input + output));
+  return { input, output, total };
+}
+
+function extractCodexMetadata(records, sourceName) {
+  const meta = {
+    runId: sourceName.replace(/\W+/g, "_"),
+    agent: "Codex",
+    model: "",
+    title: "",
+    cwd: "",
+    threadId: "",
+    sessionId: "",
+    cliVersion: "",
+    status: "",
+  };
+
+  records.forEach((event) => {
+    const payload = getPayload(event);
+    const item = getCodexItem(event);
+    const source = { ...event, ...payload, ...item };
+    const type = getCodexEventType(event);
+
+    if (type === "session_meta" || type === "session_config" || type === "turn_context" || event.type === "session_meta") {
+      meta.agent = firstPresent(source.originator, source.agent, meta.agent);
+      meta.model = firstPresent(source.model, source.model_slug, meta.model);
+      meta.cwd = firstPresent(source.cwd, source.working_directory, source.workdir, meta.cwd);
+      meta.threadId = firstPresent(source.thread_id, source.threadId, source.conversation_id, meta.threadId);
+      meta.sessionId = firstPresent(source.session_id, source.sessionId, source.id, meta.sessionId);
+      meta.cliVersion = firstPresent(source.cli_version, source.version, meta.cliVersion);
+      meta.title = firstPresent(source.title, source.name, meta.title);
+    }
+
+    meta.model = firstPresent(source.model, source.model_slug, meta.model);
+    meta.threadId = firstPresent(source.thread_id, source.threadId, source.conversation_id, meta.threadId);
+    meta.sessionId = firstPresent(source.session_id, source.sessionId, meta.sessionId);
+    meta.title = firstPresent(source.title, meta.title);
+
+    if (type === "task_complete" || type === "turn_complete") {
+      meta.status = source.success === false || source.status === "failed" ? "failed" : firstPresent(source.status, meta.status);
+    }
+  });
+
+  meta.runId = firstPresent(meta.threadId, meta.sessionId, meta.runId);
+  if (/codex/i.test(meta.agent) && !/cli/i.test(meta.agent)) meta.agent = "Codex CLI";
+  return meta;
 }
 
 function convertCodexRecords(records, sourceName) {
@@ -232,35 +337,42 @@ function convertCodexRecords(records, sourceName) {
   const calls = new Map();
   let stepId = 1;
   let tokens = { input: 0, output: 0, total: 0 };
+  const meta = extractCodexMetadata(records, sourceName);
 
   records.forEach((event) => {
-    const timestamp = event.timestamp;
-    const payload = event.payload || {};
-    const type = payload.type;
+    const timestamp = getEventTimestamp(event);
+    const payload = getCodexItem(event);
+    const type = getCodexEventType(event);
+    const role = payload.role;
 
-    if (type === "user_message") {
-      steps.push(makeStep(stepId++, "prompt", "User Request", timestamp, "ok", payload.message));
-    } else if (type === "agent_message" || type === "agent_reasoning" || type === "reasoning") {
-      steps.push(makeStep(stepId++, "reasoning", type === "agent_message" ? "Agent Message" : "Agent Reasoning", timestamp, "ok", payload.message || payload.text || payload.summary));
-    } else if (type === "function_call" || type === "custom_tool_call" || type === "web_search_call") {
-      const name = payload.name || payload.action?.type || "tool";
+    if (type === "user_message" || (type === "message" && role === "user")) {
+      steps.push(makeStep(stepId++, "prompt", "User Request", timestamp, "ok", payload.message || payload.content || payload.text));
+    } else if (type === "system_message" || type === "developer_message") {
+      steps.push(makeStep(stepId++, "prompt", type === "system_message" ? "System Instruction" : "Developer Instruction", timestamp, "ok", payload.message || payload.content || payload.text));
+    } else if (type === "agent_message" || type === "agent_reasoning" || type === "reasoning" || (type === "message" && role === "assistant")) {
+      const content = payload.message || payload.text || payload.summary || payload.content || payload.output_text;
+      steps.push(makeStep(stepId++, "reasoning", type === "agent_message" || type === "message" ? "Agent Message" : "Agent Reasoning", timestamp, "ok", content));
+    } else if (/^(function_call|custom_tool_call|web_search_call|local_shell_call|mcp_call)$/.test(type) || (type?.endsWith("_call") && type !== "task_complete")) {
+      const name = firstPresent(payload.name, payload.action?.type, payload.server_label, payload.tool, type, "tool");
       const callId = payload.call_id || payload.id || `call_${stepId}`;
       const step = makeStep(stepId++, "tool", `Tool Call: ${name}`, timestamp, "ok", "", {
         tool: name,
-        input: contentToText(payload.arguments || payload.input || payload.action || ""),
+        input: contentToText(firstPresent(payload.arguments, payload.input, payload.action, payload.command, "")),
         output: "",
         _startedAt: timestamp,
       });
       calls.set(callId, step);
       steps.push(step);
-    } else if (type === "function_call_output" || type === "custom_tool_call_output" || type === "web_search_end") {
+    } else if (type === "function_call_output" || type === "custom_tool_call_output" || type === "web_search_end" || type?.endsWith("_call_output")) {
       const callId = payload.call_id || payload.id;
       const step = calls.get(callId);
       const output = contentToText(payload.output || payload.query || payload);
       if (step) {
         step.output = output;
         step.durationMs = durationBetween(step._startedAt, timestamp);
-        if (/error|failed|exit code:\s*[1-9]/i.test(output)) step.status = "failed";
+        if (outputLooksFailed(output)) step.status = "failed";
+      } else {
+        steps.push(makeStep(stepId++, "tool", "Tool Output", timestamp, outputLooksFailed(output) ? "failed" : "ok", output));
       }
     } else if (type === "patch_apply_end") {
       const files = Object.entries(payload.changes || {}).map(([path, change]) => ({
@@ -270,22 +382,27 @@ function convertCodexRecords(records, sourceName) {
       }));
       steps.push(makeStep(stepId++, "diff", payload.success === false ? "Patch Failed" : "Patch Applied", timestamp, payload.success === false ? "failed" : "ok", payload.stdout || payload.stderr || "", { files }));
     } else if (type === "token_count") {
-      const usage = payload.info?.total_token_usage || {};
-      tokens = {
-        input: Number(usage.input_tokens || 0),
-        output: Number(usage.output_tokens || 0),
-        total: Number(usage.total_tokens || 0),
-      };
+      tokens = extractTokenUsage(payload) || tokens;
     }
+
+    tokens = extractTokenUsage(event) || extractTokenUsage(payload) || tokens;
   });
 
   steps.forEach((step) => delete step._startedAt);
   const trace = buildTrace({
-    runId: sourceName.replace(/\W+/g, "_"),
-    agent: "Codex",
-    model: "codex",
-    summary: `Codex trace imported from ${sourceName}`,
-    source: { kind: "codex_rollout", path: sourceName },
+    runId: meta.runId,
+    agent: meta.agent,
+    model: meta.model || "codex",
+    status: meta.status === "failed" ? "failed" : undefined,
+    summary: meta.title || `Codex trace imported from ${sourceName}`,
+    source: {
+      kind: "codex_rollout",
+      path: sourceName,
+      threadId: meta.threadId,
+      sessionId: meta.sessionId,
+      cwd: meta.cwd,
+      cliVersion: meta.cliVersion,
+    },
     records,
     steps,
   });
@@ -297,20 +414,47 @@ function convertClaudeRecords(records, sourceName) {
   const steps = [];
   const toolSteps = new Map();
   let stepId = 1;
+  const model = records.find((record) => record.message?.model || record.model)?.message?.model || records.find((record) => record.model)?.model;
+
+  function pairToolResult(block, timestamp, fallbackTitle = "Tool Result") {
+    const toolUseId = block?.tool_use_id || block?.id;
+    const output = contentToText(firstPresent(block?.content, block?.result, block?.output, block));
+    const step = toolSteps.get(toolUseId);
+
+    if (step) {
+      step.output = output;
+      step.durationMs = durationBetween(step._startedAt, timestamp);
+      if (block?.is_error || outputLooksFailed(output)) step.status = "failed";
+      return;
+    }
+
+    steps.push(makeStep(stepId++, "tool", fallbackTitle, timestamp, block?.is_error || outputLooksFailed(output) ? "failed" : "ok", "", {
+      tool: block?.name || "claude.tool_result",
+      input: toolUseId ? `tool_use_id: ${toolUseId}` : "",
+      output,
+    }));
+  }
 
   records.forEach((record) => {
-    const timestamp = record.timestamp || record.created_at || record.ts;
-    const role = record.type || record.role || record.message?.role;
+    const timestamp = getEventTimestamp(record);
+    const role = record.message?.role || record.role || record.type;
     const message = record.message || record;
     const content = message.content || record.content || record.text;
+    const blocks = Array.isArray(content) ? content : [content].filter(Boolean);
+    const toolResultBlocks = blocks.filter((block) => block?.type === "tool_result" || block?.tool_use_id);
 
-    if (role === "user") {
-      steps.push(makeStep(stepId++, "prompt", "User Prompt", timestamp, "ok", content));
+    if (toolResultBlocks.length) {
+      toolResultBlocks.forEach((block) => pairToolResult(block, timestamp));
+      const promptText = blocks
+        .filter((block) => !(block?.type === "tool_result" || block?.tool_use_id))
+        .map(contentToText)
+        .filter(Boolean)
+        .join("\n");
+      if (role === "user" && promptText) steps.push(makeStep(stepId++, "prompt", "User Prompt", timestamp, "ok", promptText));
       return;
     }
 
     if (role === "assistant") {
-      const blocks = Array.isArray(content) ? content : [content];
       const text = blocks.filter((block) => typeof block === "string" || block?.text).map(contentToText).join("\n");
       if (text) steps.push(makeStep(stepId++, "reasoning", "Assistant Message", timestamp, "ok", text));
 
@@ -321,6 +465,7 @@ function convertClaudeRecords(records, sourceName) {
             tool: block.name || "claude.tool",
             input: contentToText(block.input || ""),
             output: "",
+            _startedAt: timestamp,
           });
           if (block.id) toolSteps.set(block.id, step);
           steps.push(step);
@@ -328,17 +473,21 @@ function convertClaudeRecords(records, sourceName) {
       return;
     }
 
+    if (role === "user") {
+      steps.push(makeStep(stepId++, "prompt", "User Prompt", timestamp, "ok", content));
+      return;
+    }
+
     if (role === "tool_result" || record.type === "tool_result") {
-      const step = toolSteps.get(record.tool_use_id);
-      if (step) step.output = contentToText(content || record.result || record);
-      else steps.push(makeStep(stepId++, "tool", "Tool Result", timestamp, "ok", content || record.result || record));
+      pairToolResult({ ...record, content }, timestamp);
     }
   });
 
+  steps.forEach((step) => delete step._startedAt);
   return buildTrace({
     runId: sourceName.replace(/\W+/g, "_"),
     agent: "Claude Code",
-    model: "claude",
+    model: model || "claude",
     summary: `Claude Code trace imported from ${sourceName}`,
     source: { kind: "claude_code_jsonl", path: sourceName },
     records,
@@ -374,7 +523,7 @@ function convertGenericRecords(records, sourceName) {
 function detectAndConvert(records, sourceName) {
   if (!records.length) throw new Error("No records found.");
   if (records[0]?.steps && Array.isArray(records[0].steps)) return records[0];
-  if (records.some((record) => record.payload?.type === "user_message" || record.payload?.type === "function_call")) {
+  if (records.some((record) => ["session_meta", "response_item", "user_message", "function_call", "custom_tool_call"].includes(record.payload?.type) || ["user_message", "function_call", "custom_tool_call"].includes(getCodexEventType(record)))) {
     return convertCodexRecords(records, sourceName);
   }
   if (records.some((record) => record.message?.role || record.type === "assistant" || record.type === "user")) {
@@ -383,7 +532,7 @@ function detectAndConvert(records, sourceName) {
   return convertGenericRecords(records, sourceName);
 }
 
-async function importTraceFile(file) {
+async function importTraceFile(file, diagnostics) {
   const text = await file.text();
   const sourceName = file.webkitRelativePath || file.name;
   const trimmed = text.trim();
@@ -395,7 +544,7 @@ async function importTraceFile(file) {
       if (Array.isArray(json.steps)) return json;
       return detectAndConvert([json], sourceName);
     } catch {
-      const records = parseJsonLines(trimmed);
+      const records = parseJsonLines(trimmed, sourceName, diagnostics);
       return detectAndConvert(records, sourceName);
     }
   }
@@ -406,7 +555,7 @@ async function importTraceFile(file) {
     if (Array.isArray(json)) return detectAndConvert(json, sourceName);
   }
 
-  const records = parseJsonLines(trimmed);
+  const records = parseJsonLines(trimmed, sourceName, diagnostics);
   return detectAndConvert(records, sourceName);
 }
 
@@ -415,6 +564,23 @@ function isCandidateFile(file) {
   const hasExtension = candidateExtensions.some((extension) => path.endsWith(extension));
   const hasHint = candidatePathHints.some((hint) => path.includes(hint));
   return hasExtension && (hasHint || path.endsWith(".jsonl"));
+}
+
+function describeImportCandidate(candidate, index) {
+  const { file, trace } = candidate;
+  const path = file.webkitRelativePath || file.name;
+  return {
+    id: `${index}_${path}_${file.lastModified || 0}`,
+    path,
+    modifiedAt: file.lastModified ? new Date(file.lastModified).toISOString() : "",
+    events: trace.steps?.length || 0,
+    agent: trace.agent || "unknown",
+    model: trace.model || "unknown",
+    status: trace.status || "unknown",
+    startedAt: trace.startedAt || "",
+    sourceKind: trace.source?.kind || "unknown",
+    trace,
+  };
 }
 
 function ContentBlock({ label, value, preferredKind }) {
@@ -531,7 +697,73 @@ function TopBar({ trace, onUpload, onFolderUpload, onExport, importStatus }) {
   );
 }
 
-function FilterRail({ filter, onFilterChange, counts }) {
+function ImportDiagnostics({ diagnostics }) {
+  const recent = diagnostics.slice(0, 8);
+
+  return (
+    <section className="diagnostics-panel" aria-label="Import diagnostics">
+      <div className="diagnostics-heading">
+        <strong>Import Diagnostics</strong>
+        <span>{diagnostics.length}</span>
+      </div>
+      {recent.length ? (
+        <div className="diagnostics-list">
+          {recent.map((item) => (
+            <article className={`diagnostic-row ${item.level}`} key={item.id}>
+              <strong>{item.level}</strong>
+              <p>{item.message}</p>
+              <code>{item.path}</code>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="diagnostics-empty">No import issues recorded yet.</p>
+      )}
+    </section>
+  );
+}
+
+function ImportPicker({ candidates, onSelect, onCancel }) {
+  if (!candidates.length) return null;
+
+  return (
+    <div className="picker-backdrop" role="presentation">
+      <section className="import-picker" role="dialog" aria-modal="true" aria-labelledby="import-picker-title">
+        <div className="picker-header">
+          <div>
+            <span className="eyebrow">Folder Scan</span>
+            <h2 id="import-picker-title">Choose a trace to load</h2>
+          </div>
+          <button className="picker-close" onClick={onCancel}>
+            Close
+          </button>
+        </div>
+        <div className="picker-list">
+          {candidates.map((candidate, index) => (
+            <article className="picker-card" key={candidate.id}>
+              <div>
+                <div className="picker-title">
+                  <strong>{candidate.path}</strong>
+                  {index === 0 && <span>Best match</span>}
+                </div>
+                <p>
+                  {candidate.agent} / {candidate.model} / {candidate.sourceKind}
+                </p>
+                <small>
+                  {candidate.events} events / started {displayDate(candidate.startedAt)} / modified{" "}
+                  {candidate.modifiedAt ? displayDate(candidate.modifiedAt) : "unknown"}
+                </small>
+              </div>
+              <button onClick={() => onSelect(candidate)}>Load</button>
+            </article>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function FilterRail({ filter, onFilterChange, counts, diagnostics }) {
   return (
     <aside className="filter-rail">
       <div className="rail-heading">
@@ -553,6 +785,7 @@ function FilterRail({ filter, onFilterChange, counts }) {
         <strong>Workflow</strong>
         <p>Load a trace, choose an event lane, inspect the detail, then export the evidence.</p>
       </div>
+      <ImportDiagnostics diagnostics={diagnostics} />
     </aside>
   );
 }
@@ -801,6 +1034,8 @@ function App() {
   const [selected, setSelected] = useState(null);
   const [search, setSearch] = useState("");
   const [importStatus, setImportStatus] = useState("");
+  const [importDiagnostics, setImportDiagnostics] = useState([]);
+  const [importCandidates, setImportCandidates] = useState([]);
 
   const counts = useMemo(() => {
     const next = { all: trace.steps.length, prompt: 0, reasoning: 0, tool: 0, diff: 0 };
@@ -929,11 +1164,17 @@ function App() {
   async function handleTraceUpload(event) {
     const file = event.target.files?.[0];
     if (!file) return;
+    const diagnostics = [];
     setImportStatus(`Loading ${file.name}...`);
     try {
-      const nextTrace = await importTraceFile(file);
+      const nextTrace = await importTraceFile(file, diagnostics);
+      addImportDiagnostic(diagnostics, "success", file.name, `Loaded ${nextTrace.steps.length} events`);
+      setImportDiagnostics(diagnostics);
+      setImportCandidates([]);
       await loadTrace(nextTrace, `Loaded ${file.name} (${nextTrace.steps.length} events)`);
     } catch (error) {
+      addImportDiagnostic(diagnostics, "error", file.name, error.message);
+      setImportDiagnostics(diagnostics);
       setImportStatus(`Failed to load ${file.name}: ${error.message}`);
       alert(`Could not load trace: ${error.message}`);
     } finally {
@@ -943,25 +1184,36 @@ function App() {
 
   async function handleFolderUpload(event) {
     const files = Array.from(event.target.files || []).filter(isCandidateFile);
+    const diagnostics = [];
     setImportStatus(`Scanning folder... ${event.target.files?.length || 0} files selected`);
     if (!files.length) {
+      addImportDiagnostic(diagnostics, "warning", "Folder scan", "No candidate JSON, JSONL, or log files matched importer path hints.");
+      setImportDiagnostics(diagnostics);
       setImportStatus("No supported Codex / Claude Code JSONL files found in that folder.");
       event.target.value = "";
       return;
     }
 
     const candidates = [];
+    if (files.length > 300) {
+      addImportDiagnostic(diagnostics, "warning", "Folder scan", `Only the first 300 of ${files.length} candidate files were scanned.`);
+    }
+
     for (const file of files.slice(0, 300)) {
+      const path = file.webkitRelativePath || file.name;
       try {
-        setImportStatus(`Scanning ${file.webkitRelativePath || file.name}...`);
-        const traceCandidate = await importTraceFile(file);
+        setImportStatus(`Scanning ${path}...`);
+        const traceCandidate = await importTraceFile(file, diagnostics);
         if (traceCandidate.steps?.length) {
           candidates.push({ file, trace: traceCandidate });
+          addImportDiagnostic(diagnostics, "success", path, `Detected ${traceCandidate.agent || "agent"} trace with ${traceCandidate.steps.length} events.`);
         }
-      } catch {
+      } catch (error) {
+        addImportDiagnostic(diagnostics, "skipped", path, error.message);
         // Skip files that are JSON but not agent records.
       }
     }
+    setImportDiagnostics(diagnostics);
 
     if (!candidates.length) {
       setImportStatus(`Scanned ${files.length} files, but no supported agent trace was detected.`);
@@ -975,12 +1227,26 @@ function App() {
       return b.trace.steps.length - a.trace.steps.length;
     });
 
-    const best = candidates[0];
-    await loadTrace(
-      best.trace,
-      `Scanned ${files.length} files, found ${candidates.length} trace(s), loaded ${best.file.webkitRelativePath || best.file.name}`,
-    );
+    const summarized = candidates.map(describeImportCandidate);
+    if (summarized.length > 1) {
+      setImportCandidates(summarized);
+      setImportStatus(`Scanned ${files.length} files and found ${summarized.length} trace(s). Choose one to load.`);
+      event.target.value = "";
+      return;
+    }
+
+    const best = summarized[0];
+    setImportCandidates([]);
+    await loadTrace(best.trace, `Scanned ${files.length} files, loaded ${best.path}`);
     event.target.value = "";
+  }
+
+  async function handleCandidateSelect(candidate) {
+    setImportCandidates([]);
+    const diagnostics = [...importDiagnostics];
+    addImportDiagnostic(diagnostics, "success", candidate.path, `Loaded selected trace with ${candidate.events} events.`);
+    setImportDiagnostics(diagnostics);
+    await loadTrace(candidate.trace, `Loaded ${candidate.path} (${candidate.events} events)`);
   }
 
   function downloadReport() {
@@ -1005,7 +1271,7 @@ function App() {
       />
 
       <div className="workspace-grid">
-        <FilterRail filter={filter} onFilterChange={handleFilterChange} counts={counts} />
+        <FilterRail filter={filter} onFilterChange={handleFilterChange} counts={counts} diagnostics={importDiagnostics} />
 
         <main className="detail-stage">
           <HeroPanel trace={trace} failures={failures} />
@@ -1045,6 +1311,14 @@ function App() {
           <Timeline steps={filteredSteps} activeId={selected?.id} onSelect={setSelected} traceStartedAt={trace.startedAt} />
         </aside>
       </div>
+      <ImportPicker
+        candidates={importCandidates}
+        onSelect={handleCandidateSelect}
+        onCancel={() => {
+          setImportCandidates([]);
+          setImportStatus("Trace selection canceled.");
+        }}
+      />
     </div>
   );
 }

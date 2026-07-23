@@ -59,6 +59,7 @@ When adding importer support:
 - Preserve timestamps.
 - Keep private data handling in mind.
 - Add documentation updates in `docs/IMPORTERS.md`.
+- Add or update synthetic fixtures in `data/fixtures/` when importer behavior changes.
 
 ## Release checklist
 

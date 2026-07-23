@@ -16,12 +16,12 @@ AgentScope is an early MVP. This roadmap is intentionally practical and focused 
 
 ## 0.2 - Importer Hardening
 
-- [ ] Better Codex metadata extraction
-- [ ] Better Claude Code tool result pairing
-- [ ] Cursor and Cline importer research
-- [ ] Import result picker when multiple traces are found
-- [ ] Import error diagnostics panel
-- [ ] Sample trace fixtures for each importer
+- [x] Better Codex metadata extraction
+- [x] Better Claude Code tool result pairing
+- [x] Cursor and Cline importer research
+- [x] Import result picker when multiple traces are found
+- [x] Import error diagnostics panel
+- [x] Sample trace fixtures for each importer
 
 ## 0.3 - Privacy and Sharing
 

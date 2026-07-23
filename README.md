@@ -21,13 +21,14 @@ AgentScope is a lightweight trace viewer for answering those questions locally.
 ## Highlights
 
 - **Local-first trace viewer**: no account, no backend, no telemetry required.
-- **Folder scan import**: choose a Codex or Claude Code records folder and load a trace automatically.
+- **Folder scan import**: choose a Codex or Claude Code records folder, review detected traces, and load the one you need.
 - **Codex support**: imports Codex rollout JSONL records.
 - **Claude Code support**: imports transcript-style JSONL records.
 - **Timeline review mode**: filter, search, jump, and move through events quickly.
 - **Markdown / JSON / code viewer**: preview Markdown, format JSON, highlight code, and copy content.
 - **Date-grouped event list**: events are grouped by day in a vertical timeline.
 - **Trace export**: export the currently loaded trace as JSON.
+- **Import diagnostics**: inspect skipped files, JSONL parse warnings, and detected trace candidates.
 
 ## Status
 
@@ -39,6 +40,7 @@ The repository includes a sample trace:
 
 ```text
 data/sample-trace.json
+data/fixtures/
 ```
 
 The app does not load sample data by default. Start the app, then load a trace manually with **Load Trace** or **Scan Folder**.
@@ -81,7 +83,7 @@ Use **Load Trace** to import:
 
 ### Scan a folder
 
-Use **Scan Folder** to select a local folder. AgentScope will scan candidate files, detect supported records, convert the best match, and load it automatically.
+Use **Scan Folder** to select a local folder. AgentScope will scan candidate files, detect supported records, and open a picker when multiple traces are found. The import diagnostics panel lists detected traces, skipped files, and isolated JSONL parse warnings.
 
 Recommended folders:
 

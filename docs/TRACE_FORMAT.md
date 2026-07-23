@@ -19,6 +19,20 @@ AgentScope traces are JSON documents that describe one AI agent run.
 | `source` | object | no | Import source metadata. |
 | `steps` | array | yes | Ordered event list. |
 
+## Source fields
+
+`source` is optional, but importers should include it when a trace is converted from another tool.
+
+| Field | Type | Required | Description |
+|---|---:|---:|---|
+| `kind` | string | no | Importer identifier, such as `codex_rollout`, `claude_code_jsonl`, or `generic_jsonl`. |
+| `path` | string | no | Browser-provided file or relative folder path. Treat as sensitive. |
+| `recordCount` | number | no | Number of source records used by the importer. |
+| `threadId` | string | no | Upstream thread/conversation id when available. |
+| `sessionId` | string | no | Upstream session id when available. |
+| `cwd` | string | no | Upstream working directory when available. Treat as sensitive. |
+| `cliVersion` | string | no | Upstream CLI version when available. |
+
 ## Step fields
 
 | Field | Type | Required | Description |

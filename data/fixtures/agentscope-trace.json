@@ -1,0 +1,44 @@
+﻿{
+  "runId": "fixture_agentscope_native",
+  "agent": "Fixture Agent",
+  "model": "fixture-model",
+  "status": "ok",
+  "startedAt": "2026-07-21T09:00:00Z",
+  "durationMs": 9000,
+  "tokens": {
+    "input": 120,
+    "output": 80,
+    "total": 200
+  },
+  "costUsd": 0,
+  "riskScore": 12,
+  "summary": "Synthetic native AgentScope trace fixture.",
+  "source": {
+    "kind": "agentscope_trace",
+    "path": "data/fixtures/agentscope-trace.json"
+  },
+  "steps": [
+    {
+      "id": "s1",
+      "type": "prompt",
+      "title": "User Request",
+      "timestamp": "2026-07-21T09:00:00Z",
+      "time": "09:00:00",
+      "durationMs": 0,
+      "status": "ok",
+      "content": "Summarize the synthetic incident report."
+    },
+    {
+      "id": "s2",
+      "type": "tool",
+      "title": "Tool Call: fixture.lookup",
+      "timestamp": "2026-07-21T09:00:03Z",
+      "time": "09:00:03",
+      "durationMs": 2000,
+      "status": "ok",
+      "tool": "fixture.lookup",
+      "input": "incident-123",
+      "output": "Synthetic incident data returned."
+    }
+  ]
+}

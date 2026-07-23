@@ -21,12 +21,17 @@ The format loosely follows Keep a Changelog, and this project uses semantic vers
 - Code syntax highlighting.
 - Copy actions for content blocks.
 - Codex rollout export helper script.
+- Import picker for folder scans that detect multiple traces.
+- Import diagnostics panel for detected traces, skipped files, and JSONL parse warnings.
+- Synthetic importer fixtures for native AgentScope, Codex, Claude Code, and generic JSONL records.
 
 ### Changed
 
 - Moved detailed content into the primary center panel.
 - Moved event list to the right side.
 - Compressed overview and metric areas to maximize event and content space.
+- Hardened Codex imports with session metadata extraction, nested `response_item` handling, and broader token usage detection.
+- Improved Claude Code imports by pairing user-message `tool_result` blocks back to assistant `tool_use` calls.
 
 ### Security
 
