@@ -25,11 +25,11 @@ AgentScope is an early MVP. This roadmap is intentionally practical and focused 
 
 ## 0.3 - Privacy and Sharing
 
-- [ ] Secret redaction rules
-- [ ] File path redaction rules
-- [ ] One-click sanitized export
-- [ ] Single-file HTML trace report
-- [ ] Shareable static report mode
+- [x] Secret redaction rules
+- [x] File path redaction rules
+- [x] One-click sanitized export
+- [x] Single-file HTML trace report
+- [x] Shareable static report mode
 
 ## 0.4 - Live Capture
 

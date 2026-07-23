@@ -24,6 +24,8 @@ The format loosely follows Keep a Changelog, and this project uses semantic vers
 - Import picker for folder scans that detect multiple traces.
 - Import diagnostics panel for detected traces, skipped files, and JSONL parse warnings.
 - Synthetic importer fixtures for native AgentScope, Codex, Claude Code, and generic JSONL records.
+- One-click sanitized JSON export with secret and file-path redaction.
+- Single-file static HTML report export for shareable sanitized reviews.
 
 ### Changed
 
@@ -36,3 +38,4 @@ The format loosely follows Keep a Changelog, and this project uses semantic vers
 ### Security
 
 - Sanitized Markdown rendering with DOMPurify.
+- Added best-effort redaction for common API keys, tokens, authorization headers, private keys, and local file paths in sanitized exports.

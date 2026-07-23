@@ -50,6 +50,18 @@ AgentScope uses a fixed-height desktop-style layout:
 
 The page itself does not globally scroll. Only the relevant panels scroll.
 
+## Privacy and sharing development
+
+Sanitized JSON export and static HTML report generation live in `src/main.jsx`.
+
+When changing privacy behavior:
+
+- Keep all redaction local in the browser.
+- Do not send trace content to external services.
+- Update `docs/PRIVACY.md` when redaction rules change.
+- Keep static HTML reports self-contained and dependency-free.
+- Escape report content before inserting it into generated HTML.
+
 ## Importer development
 
 When adding importer support:

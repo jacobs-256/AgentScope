@@ -60,6 +60,24 @@ const typeDescriptions = {
 
 const candidateExtensions = [".json", ".jsonl", ".log"];
 const candidatePathHints = ["rollout", "session", "transcript", "claude", "codex", "conversation", "cursor", "cline"];
+const redactionToken = "[REDACTED]";
+const pathRedactionToken = "[REDACTED_PATH]";
+const secretRedactionRules = [
+  { label: "OpenAI API key", pattern: /\bsk-[A-Za-z0-9_-]{16,}\b/g },
+  { label: "GitHub token", pattern: /\bgh[pousr]_[A-Za-z0-9_]{16,}\b/g },
+  { label: "AWS access key", pattern: /\b(A3T[A-Z0-9]|AKIA|ASIA)[A-Z0-9]{16}\b/g },
+  { label: "JWT", pattern: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g },
+  { label: "Authorization header", pattern: /\b(Authorization\s*[:=]\s*)(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, replacement: `$1${redactionToken}` },
+  { label: "Secret assignment", pattern: /\b(api[_-]?key|access[_-]?token|auth[_-]?token|refresh[_-]?token|secret|password|passwd|pwd)\b(\s*[:=]\s*)(["']?)[^"'\s,;}]+/gi, replacement: `$1$2$3${redactionToken}` },
+  { label: "Private key block", pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, replacement: redactionToken },
+];
+const pathRedactionRules = [
+  { label: "Windows absolute path", pattern: /\b[A-Za-z]:\\(?:[^\\/:*?"<>|\r\n]+\\)*[^\\/:*?"<>|\s\r\n]*/g },
+  { label: "Windows user path", pattern: /\\Users\\[^\\\s\r\n]+\\(?:[^\\/:*?"<>|\r\n]+\\)*[^\\/:*?"<>|\s\r\n]*/g },
+  { label: "POSIX user path", pattern: /(?:^|[\s"'(])\/(?:Users|home)\/[^\s"'<>`]+/g },
+  { label: "Tilde path", pattern: /(?:^|[\s"'(])~\/[^\s"'<>`]+/g },
+  { label: "File URL", pattern: /file:\/\/\/?[^\s"'<>`]+/gi },
+];
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -187,6 +205,200 @@ function highlightedHtml(text, language) {
 
 function markdownHtml(text) {
   return DOMPurify.sanitize(marked.parse(text, { breaks: true }));
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+function safeFilePart(path) {
+  const normalized = String(path || "").replaceAll("\\", "/");
+  const fileName = normalized.split("/").filter(Boolean).at(-1);
+  if (!fileName || fileName.startsWith(".")) return "file";
+  return fileName;
+}
+
+function redactPathLikeString(value, stats) {
+  let text = String(value ?? "");
+  pathRedactionRules.forEach((rule) => {
+    text = text.replace(rule.pattern, (match) => {
+      const prefix = /^[\s"'(]/.test(match) ? match[0] : "";
+      const rawPath = prefix ? match.slice(1) : match;
+      const separator = rawPath.includes("\\") ? "\\" : "/";
+      stats.paths += 1;
+      stats.ruleHits[rule.label] = (stats.ruleHits[rule.label] || 0) + 1;
+      return `${prefix}${pathRedactionToken}${separator}${safeFilePart(rawPath)}`;
+    });
+  });
+  return text;
+}
+
+function redactSecretsInString(value, stats) {
+  let text = String(value ?? "");
+  secretRedactionRules.forEach((rule) => {
+    text = text.replace(rule.pattern, (...args) => {
+      stats.secrets += 1;
+      stats.ruleHits[rule.label] = (stats.ruleHits[rule.label] || 0) + 1;
+      if (rule.replacement) {
+        return String(rule.replacement).replace(/\$(\d+)/g, (_, index) => args[Number(index)] || "");
+      }
+      return redactionToken;
+    });
+  });
+  return text;
+}
+
+function redactString(value, stats) {
+  return redactPathLikeString(redactSecretsInString(value, stats), stats);
+}
+
+function redactKnownPath(value, stats) {
+  if (!value) return value;
+  const raw = String(value);
+  if (!/[\\/]|^file:/i.test(raw)) return redactString(raw, stats);
+  stats.paths += 1;
+  stats.ruleHits["Path field"] = (stats.ruleHits["Path field"] || 0) + 1;
+  const separator = raw.includes("\\") ? "\\" : "/";
+  return `${pathRedactionToken}${separator}${safeFilePart(raw)}`;
+}
+
+function sanitizeTraceForSharing(trace) {
+  const stats = { secrets: 0, paths: 0, ruleHits: {} };
+  const sanitizedSteps = (trace.steps || []).map((step) => ({
+    ...step,
+    title: redactString(step.title, stats),
+    content: redactString(step.content, stats),
+    tool: redactString(step.tool, stats),
+    input: redactString(step.input, stats),
+    output: redactString(step.output, stats),
+    files: step.files?.map((file) => ({
+      ...file,
+      path: redactKnownPath(file.path, stats),
+    })),
+  }));
+  const sanitized = {
+    ...trace,
+    runId: redactString(trace.runId, stats),
+    agent: redactString(trace.agent, stats),
+    model: redactString(trace.model, stats),
+    summary: redactString(trace.summary, stats),
+    source: trace.source
+      ? compactObject({
+          ...trace.source,
+          path: redactKnownPath(trace.source.path, stats),
+          cwd: redactKnownPath(trace.source.cwd, stats),
+          threadId: trace.source.threadId ? redactionToken : undefined,
+          sessionId: trace.source.sessionId ? redactionToken : undefined,
+        })
+      : undefined,
+    steps: sanitizedSteps,
+    sharing: {
+      sanitizedAt: new Date().toISOString(),
+      mode: "sanitized",
+      redactions: {
+        secrets: stats.secrets,
+        paths: stats.paths,
+        rules: stats.ruleHits,
+      },
+    },
+  };
+  return { trace: sanitized, stats };
+}
+
+function downloadBlob(content, fileName, type) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function safeDownloadName(value) {
+  return String(value || "agentscope")
+    .replace(/[\\/:*?"<>|\s]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 120) || "agentscope";
+}
+
+function reportStatusLabel(status) {
+  return statusMeta[status]?.label || status || "Unknown";
+}
+
+function buildStaticHtmlReport(trace, stats) {
+  const generatedAt = new Date().toISOString();
+  const steps = trace.steps || [];
+  const counts = steps.reduce(
+    (acc, step) => {
+      acc[step.type] = (acc[step.type] || 0) + 1;
+      return acc;
+    },
+    { all: steps.length },
+  );
+  const eventCards = steps
+    .map((step, index) => {
+      const files = step.files?.length
+        ? `<div class="files">${step.files
+            .map((file) => `<div><code>${escapeHtml(file.path)}</code><span>+${escapeHtml(file.adds)} / -${escapeHtml(file.deletes)}</span></div>`)
+            .join("")}</div>`
+        : "";
+      const io = step.tool
+        ? `<div class="io"><h4>Tool</h4><pre>${escapeHtml(step.tool)}</pre><h4>Input</h4><pre>${escapeHtml(step.input || "n/a")}</pre><h4>Output</h4><pre>${escapeHtml(step.output || "n/a")}</pre></div>`
+        : "";
+      return `<article class="event ${escapeHtml(step.status)}">
+        <header><span>#${String(index + 1).padStart(2, "0")}</span><strong>${escapeHtml(step.title)}</strong><em>${escapeHtml(step.type)} / ${escapeHtml(reportStatusLabel(step.status))}</em></header>
+        <p>${escapeHtml(step.timestamp || step.time || "No timestamp")}</p>
+        <pre>${escapeHtml(step.content || "No narrative content captured.")}</pre>
+        ${io}
+        ${files}
+      </article>`;
+    })
+    .join("");
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AgentScope Static Report - ${escapeHtml(trace.runId)}</title>
+  <style>
+    :root{color:#162234;background:#eef5fd;font-family:Verdana,Georgia,sans-serif}*{box-sizing:border-box}body{margin:0;background:linear-gradient(135deg,#f7fbff,#e8f1fb);}.shell{max-width:1180px;margin:0 auto;padding:28px}.hero,.card,.event{border:1px solid #d7e0ec;border-radius:18px;background:#fff;box-shadow:0 12px 34px rgba(7,22,41,.08)}.hero{display:grid;grid-template-columns:1fr auto;gap:18px;padding:24px;margin-bottom:16px;background:linear-gradient(135deg,#fff,#f3f8ff)}h1{margin:0 0 8px;color:#071629;font-family:Georgia,serif;font-size:36px;letter-spacing:-.04em}.hero p{margin:0;color:#41516a;line-height:1.5}.badge{display:inline-grid;place-items:center;border-radius:999px;padding:8px 12px;color:#fff;background:#1d5fae;font-weight:800}.grid{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:16px}.card{padding:14px}.card span{display:block;color:#6c7a90;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.08em}.card strong{display:block;margin-top:4px;color:#071629;font-size:22px}.notice{border-left:4px solid #16875d}.events{display:grid;gap:12px}.event{overflow:hidden}.event header{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;padding:12px 14px;background:#f3f8ff;border-bottom:1px solid #d7e0ec}.event header span,.event header em{color:#1d5fae;font-size:12px;font-style:normal;font-weight:800}.event.failed header em{color:#c4342d}.event.warning header em{color:#b76b00}.event p{margin:12px 14px 0;color:#6c7a90;font-size:12px}pre{margin:12px 14px;padding:12px;overflow:auto;border-radius:12px;color:#d7e8ff;background:#071629;white-space:pre-wrap}.io h4{margin:12px 14px 0;color:#41516a;font-size:12px;text-transform:uppercase;letter-spacing:.08em}.files{display:grid;gap:8px;margin:12px 14px 14px}.files div{display:flex;justify-content:space-between;gap:12px;border:1px solid #d7e0ec;border-radius:10px;padding:9px;background:#f8fbff}code{overflow-wrap:anywhere;color:#12345d}@media(max-width:760px){.shell{padding:14px}.hero,.grid{grid-template-columns:1fr}.event header{grid-template-columns:1fr}.files div{display:grid}}
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div>
+        <span class="badge">Static Report</span>
+        <h1>${escapeHtml(trace.agent)} trace</h1>
+        <p>${escapeHtml(trace.summary || "Sanitized AgentScope trace report.")}</p>
+      </div>
+      <div class="card notice">
+        <span>Generated</span>
+        <strong>${escapeHtml(displayDate(generatedAt))}</strong>
+      </div>
+    </section>
+    <section class="grid" aria-label="Report metrics">
+      <div class="card"><span>Run ID</span><strong>${escapeHtml(trace.runId)}</strong></div>
+      <div class="card"><span>Status</span><strong>${escapeHtml(trace.status)}</strong></div>
+      <div class="card"><span>Events</span><strong>${steps.length}</strong></div>
+      <div class="card"><span>Tools</span><strong>${counts.tool || 0}</strong></div>
+      <div class="card"><span>Redactions</span><strong>${stats.secrets + stats.paths}</strong></div>
+    </section>
+    <section class="card notice">
+      <span>Privacy</span>
+      <p>This report was generated from AgentScope sanitized export. Automatic redaction found ${stats.secrets} secret-like value(s) and ${stats.paths} path value(s). Review before public sharing.</p>
+    </section>
+    <section class="events" aria-label="Events">${eventCards}</section>
+  </main>
+</body>
+</html>`;
 }
 
 function addImportDiagnostic(diagnostics, level, path, message, details = {}) {
@@ -660,7 +872,7 @@ function MetricCard({ label, value, hint, tone }) {
   );
 }
 
-function TopBar({ trace, onUpload, onFolderUpload, onExport, importStatus }) {
+function TopBar({ trace, onUpload, onFolderUpload, onExport, onSanitizedExport, onHtmlReport, importStatus }) {
   return (
     <header className="top-bar">
       <div className="brand-lockup">
@@ -692,6 +904,12 @@ function TopBar({ trace, onUpload, onFolderUpload, onExport, importStatus }) {
         <button className="action ghost-action" onClick={onExport}>
           Export JSON
         </button>
+        <button className="action safe-action" onClick={onSanitizedExport}>
+          Sanitized JSON
+        </button>
+        <button className="action report-action" onClick={onHtmlReport}>
+          HTML Report
+        </button>
       </div>
     </header>
   );
@@ -719,6 +937,30 @@ function ImportDiagnostics({ diagnostics }) {
       ) : (
         <p className="diagnostics-empty">No import issues recorded yet.</p>
       )}
+    </section>
+  );
+}
+
+function PrivacyPanel({ stats }) {
+  const total = stats.secrets + stats.paths;
+
+  return (
+    <section className="privacy-panel" aria-label="Privacy redaction summary">
+      <div className="privacy-heading">
+        <strong>Privacy Guard</strong>
+        <span>{total}</span>
+      </div>
+      <p>Sanitized exports redact secret-like values and local file paths before sharing.</p>
+      <div className="privacy-stats">
+        <div>
+          <span>Secrets</span>
+          <strong>{stats.secrets}</strong>
+        </div>
+        <div>
+          <span>Paths</span>
+          <strong>{stats.paths}</strong>
+        </div>
+      </div>
     </section>
   );
 }
@@ -763,7 +1005,7 @@ function ImportPicker({ candidates, onSelect, onCancel }) {
   );
 }
 
-function FilterRail({ filter, onFilterChange, counts, diagnostics }) {
+function FilterRail({ filter, onFilterChange, counts, diagnostics, privacyStats }) {
   return (
     <aside className="filter-rail">
       <div className="rail-heading">
@@ -785,6 +1027,7 @@ function FilterRail({ filter, onFilterChange, counts, diagnostics }) {
         <strong>Workflow</strong>
         <p>Load a trace, choose an event lane, inspect the detail, then export the evidence.</p>
       </div>
+      <PrivacyPanel stats={privacyStats} />
       <ImportDiagnostics diagnostics={diagnostics} />
     </aside>
   );
@@ -1079,6 +1322,7 @@ function App() {
   const changedFiles = trace.steps.reduce((sum, step) => sum + (step.files?.length ?? 0), 0);
   const tokenTotal = Number(trace.tokens?.total || 0);
   const cost = Number(trace.costUsd || 0);
+  const sanitizedPreview = useMemo(() => sanitizeTraceForSharing(trace), [trace]);
 
   function selectRelative(delta) {
     if (!filteredSteps.length) return;
@@ -1251,13 +1495,20 @@ function App() {
 
   function downloadReport() {
     const payload = JSON.stringify(trace, null, 2);
-    const blob = new Blob([payload], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `${trace.runId || "agentscope"}-trace.json`;
-    anchor.click();
-    URL.revokeObjectURL(url);
+    downloadBlob(payload, `${safeDownloadName(trace.runId)}-trace.json`, "application/json");
+  }
+
+  function downloadSanitizedReport() {
+    const { trace: sanitized, stats } = sanitizeTraceForSharing(trace);
+    downloadBlob(JSON.stringify(sanitized, null, 2), `${safeDownloadName(sanitized.runId)}-sanitized-trace.json`, "application/json");
+    setImportStatus(`Sanitized export created (${stats.secrets} secrets, ${stats.paths} paths redacted).`);
+  }
+
+  function downloadHtmlReport() {
+    const { trace: sanitized, stats } = sanitizeTraceForSharing(trace);
+    const html = buildStaticHtmlReport(sanitized, stats);
+    downloadBlob(html, `${safeDownloadName(sanitized.runId)}-static-report.html`, "text/html");
+    setImportStatus(`Static HTML report created (${stats.secrets} secrets, ${stats.paths} paths redacted).`);
   }
 
   return (
@@ -1267,11 +1518,19 @@ function App() {
         onUpload={handleTraceUpload}
         onFolderUpload={handleFolderUpload}
         onExport={downloadReport}
+        onSanitizedExport={downloadSanitizedReport}
+        onHtmlReport={downloadHtmlReport}
         importStatus={importStatus}
       />
 
       <div className="workspace-grid">
-        <FilterRail filter={filter} onFilterChange={handleFilterChange} counts={counts} diagnostics={importDiagnostics} />
+        <FilterRail
+          filter={filter}
+          onFilterChange={handleFilterChange}
+          counts={counts}
+          diagnostics={importDiagnostics}
+          privacyStats={sanitizedPreview.stats}
+        />
 
         <main className="detail-stage">
           <HeroPanel trace={trace} failures={failures} />

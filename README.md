@@ -29,6 +29,7 @@ AgentScope is a lightweight trace viewer for answering those questions locally.
 - **Date-grouped event list**: events are grouped by day in a vertical timeline.
 - **Trace export**: export the currently loaded trace as JSON.
 - **Import diagnostics**: inspect skipped files, JSONL parse warnings, and detected trace candidates.
+- **Privacy exports**: create sanitized JSON or single-file static HTML reports for review and sharing.
 
 ## Status
 
@@ -171,6 +172,8 @@ See [Trace Format](./docs/TRACE_FORMAT.md) for details.
 ## Privacy
 
 Agent traces may contain sensitive information: prompts, source paths, code snippets, command output, secrets, customer data, or internal reasoning. Review traces before sharing them publicly.
+
+Use **Sanitized JSON** to export a redacted trace. Use **HTML Report** to export a self-contained static report that uses the same redaction rules and can be opened without the AgentScope app. Automatic redaction covers common secret-like values and local file paths, but manual review is still required before public sharing.
 
 See [Privacy Guide](./docs/PRIVACY.md) and [Security Policy](./SECURITY.md).
 

@@ -17,6 +17,7 @@ AgentScope traces are JSON documents that describe one AI agent run.
 | `riskScore` | number | no | UI risk score from 0 to 100. |
 | `summary` | string | no | Human-readable run summary. |
 | `source` | object | no | Import source metadata. |
+| `sharing` | object | no | Sanitized export metadata. |
 | `steps` | array | yes | Ordered event list. |
 
 ## Source fields
@@ -32,6 +33,24 @@ AgentScope traces are JSON documents that describe one AI agent run.
 | `sessionId` | string | no | Upstream session id when available. |
 | `cwd` | string | no | Upstream working directory when available. Treat as sensitive. |
 | `cliVersion` | string | no | Upstream CLI version when available. |
+
+## Sharing fields
+
+Sanitized JSON exports include a `sharing` block.
+
+| Field | Type | Required | Description |
+|---|---:|---:|---|
+| `sanitizedAt` | string | no | ISO timestamp when the sanitized export was generated. |
+| `mode` | string | no | Export mode, currently `sanitized`. |
+| `redactions` | object | no | Redaction counters for sharing review. |
+
+`sharing.redactions` includes:
+
+| Field | Type | Required | Description |
+|---|---:|---:|---|
+| `secrets` | number | no | Count of secret-like matches replaced with `[REDACTED]`. |
+| `paths` | number | no | Count of path-like matches replaced with `[REDACTED_PATH]`. |
+| `rules` | object | no | Per-rule match counts. |
 
 ## Step fields
 
